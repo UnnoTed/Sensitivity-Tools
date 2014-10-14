@@ -1,0 +1,1 @@
+need python 2.7 + pyqt4 + py2exe
