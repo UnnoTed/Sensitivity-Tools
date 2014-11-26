@@ -107,6 +107,36 @@ class MainWindow(QWidget, Ui_Form):
     self.Convert()
     self.setFixedSize(329, 375)
 
+    self.size2sens_btn_inch.clicked.connect(self.size2sens_GenerateFromInch)
+    self.size2sens_btn_cm.clicked.connect(self.size2sens_GenerateFromCM)
+
+  def size2sens_GenerateFromInch(self):
+    inch = float(self.size2sens_inch.text() if len(self.size2sens_inch.text()) > 0 else -1)
+    dpi = int(self.size2sens_dpi.text() if len(self.size2sens_dpi.text()) > 2 else -1)
+
+    if inch == -1 or dpi == -1:
+      return
+
+    raw = 360 / inch
+    sens = round(raw / dpi / 0.022, 2)
+
+    self.size2sens_sens.setText(str(sens))
+    self.size2sens_result_inch.setText(str(inch))
+    self.size2sens_result_cm.setText(str(roundSens(inch * 2.54)))
+
+  def size2sens_GenerateFromCM(self):
+    cm = float(self.size2sens_cm.text() if len(self.size2sens_cm.text()) > 0 else -1)
+    dpi = int(self.size2sens_dpi.text() if len(self.size2sens_dpi.text()) > 2 else -1)
+
+    if cm == -1 or dpi == -1:
+      return
+
+    sens = round((360 / (cm / 2.54)) / dpi / 0.022, 2)
+
+    self.size2sens_sens.setText(str(sens))
+    self.size2sens_result_inch.setText(str(roundSens((cm / 2.54))))
+    self.size2sens_result_cm.setText(str(cm))
+
   """ TAB: size/360 """
 
   ###########################
