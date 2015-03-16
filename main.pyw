@@ -3,19 +3,70 @@ Sensitivity Tools
 
 Developed by sk1LLb0X
 
-Version 0.1
+Version 0.4
 """
 
-import os, sys, math, random, platform, ctypes
-from subprocess import call, Popen, PIPE
+import os, sys, math, random, platform, ctypes, json, datetime, webbrowser, time, threading
 
 import warnings
 warnings.simplefilter('ignore')
 
-from PyQt4.QtCore import pyqtSignature, QString, Qt, QVariant, SIGNAL, SLOT
+from PyQt4.QtCore import pyqtSignature, QString, Qt, QVariant, SIGNAL, SLOT, QDate
 from PyQt4.QtGui import *
 from PyQt4 import Qt
+
 from ui_main_window import Ui_Form
+from ui_history_window import Ui_HistoryForm
+
+SKILL_URL = "http://github.com/sk1LLb0X"
+VERSION = "0.4"
+
+HISTORY_HTML = ""
+HISTORY_CSS = ""
+
+try:
+  with open ("history.html", "r") as file:
+    HISTORY_HTML = file.read()
+except IOError:
+  print "Missing history.html"
+
+try:
+  with open ("history.css", "r") as file:
+    HISTORY_CSS = file.read()
+except IOError:
+  print "Missing history.css"
+
+""" Config """
+
+cfg = {}
+try:
+  with open("config.json") as file:
+    cfg = json.load(file)
+except IOError:
+  with open("config.json", "w") as file:
+    file.write("{}")
+    file.close()
+    cfg = {}
+
+def saveConfig():
+  with open("config.json", "w") as file:
+    json.dump(cfg, file, indent = 2, sort_keys = True)
+
+""" History """
+
+history = {}
+try:
+  with open("history.json") as file:
+    history = json.load(file)
+except IOError:
+  with open("history.json", "w") as file:
+    file.write("{}")
+    file.close()
+    history = {}
+
+def saveHistory():
+  with open("history.json", "w") as file:
+    json.dump(history, file, indent = 2, sort_keys = True)
 
 """ some useful stuff """
 
@@ -59,14 +110,51 @@ def mouseDPI(mouse):
   return dpiList
 #END: mouseDPI
 
+if cfg.get("win_sens", None) == None:
+  cfg["win_sens"] = 6
+  saveConfig()
+
+if cfg.get("m_yaw", None) == None:
+  cfg["m_yaw"] = 0.022
+  saveConfig()
+
 # sensitivity modes: low, medium, high (cm/360)
-modes = [
-  [45, 22], # 0 -> low
-  [22, 14], # 1 -> medium
-  [14, 3],  # 2 -> high
-  [45, 3]   # 3 -> random
-]
-#END: modes
+# random sensitivity settings
+if cfg.get("random", None) == None:
+  cfg["random"] = {
+    "low" : {
+      "min" : 45,
+      "max" : 22
+    },
+
+    "medium" : {
+      "min" : 22,
+      "max" : 14
+    },
+
+    "high" : {
+      "min" : 14,
+      "max" : 3
+    },
+
+    "all" : {
+      "min" : 45,
+      "max" : 3
+    }
+  }
+  saveConfig()
+#END: random sensitivity settings
+
+
+def randomSensMode(index):
+  if index == 0:
+    return "low"
+  elif index == 1:
+    return "medium"
+  elif index == 2:
+    return "high"
+  else:
+    return "all"
 
 def randomSens(dpi, mode, mouse):
   # get the dpi list
@@ -79,20 +167,36 @@ def randomSens(dpi, mode, mouse):
   sens = 0
 
   while True:
-    # random number between 0 and 20 (who is going to use more than 20 sens? max i've used was 15)
-    r = round(random.uniform(0, 20), 2)
+    r = round(random.uniform(0, 200), 2)
 
     # calculate the cm/360
-    calc = (360 / (0.022 * dpi * r)) * 2.54
+    calc = 1
+
+    try:
+      calc = (360 / (cfg["m_yaw"] * dpi * r)) * 2.54
+    except ZeroDivisionError:
+      calc = 1
 
     # if the generated cm/360 is between the max and minimum cm/360 of the sensitivity mode it'll break the loop
-    if calc < modes[mode][0] and calc > modes[mode][1]:
+    if calc < cfg["random"][randomSensMode(mode)]["min"] and calc > cfg["random"][randomSensMode(mode)]["max"]:
       sens = r
       break
   #END: while
 
   return {'dpi': dpi, 'sens': sens}
 #END: randomSens
+
+def twoChar(number):
+  if number > 0 and number < 10:
+    return "0" + str(number)
+  else:
+    return number
+
+class HistoryWindow(QWidget, Ui_HistoryForm):
+  def __init__(self, parent = None):
+    QWidget.__init__(self, parent)
+    self.setupUi(self)
+    self.resize(430, 430)
 
 """ main class """
 
@@ -105,35 +209,233 @@ class MainWindow(QWidget, Ui_Form):
     self.winSlider()
     self.genSens()
     self.Convert()
-    self.setFixedSize(329, 375)
+    self.loadSettings()
+    self.loadHistory()
+    self.setFixedSize(420, 420)
+    self.setWindowTitle('Sensitivity Tools v' + VERSION)
+
+    self.settings_label.setHidden(True)
+
+    self.HistoryWindow = HistoryWindow()
 
     self.size2sens_btn_inch.clicked.connect(self.size2sens_GenerateFromInch)
     self.size2sens_btn_cm.clicked.connect(self.size2sens_GenerateFromCM)
 
+    self.size2sens_btn_zoom_inch.clicked.connect(self.size2sens_GenerateZoomFromInch)
+    self.size2sens_btn_zoom_cm.clicked.connect(self.size2sens_GenerateZoomFromCM)
+
+    self.settings_btn_save.clicked.connect(self.saveSettings)
+
+    self.skillurl.clicked.connect(self.openUrl)
+
+    self.history_calendar.clicked.connect(self.updateHistory)
+    self.history_show.clicked.connect(self.showHistory)
+
+    self.tabWidget.currentChanged.connect(self.reloadHistory)
+
+  def reloadHistory(self):
+    if self.tabWidget.currentIndex() == 4:
+      self.loadHistory()
+
+  def showHistory(self):
+    self.HistoryWindow.show()
+
+  def updateHistory(self):
+    date = self.history_calendar.selectedDate()
+    strDate = "{year}-{month}-{day}".format(year = twoChar(date.year()), month = twoChar(date.month()), day = twoChar(date.day()))
+
+    styles = "<style>%s</style>" % HISTORY_CSS
+    sensNumber = 0
+
+    historyModel = HISTORY_HTML
+
+    if history.get(strDate, None):
+      sensList = history[strDate]
+      historyText = ""
+
+      for i in sensList:
+        sDate = datetime.datetime.strptime(i["date"], "%Y-%m-%d %H:%M:%S").date()
+        sTime = datetime.datetime.strptime(i["date"], "%Y-%m-%d %H:%M:%S").time()
+
+        sensNumber += 1
+
+        historyText += historyModel.format(
+          month = twoChar(sDate.month),
+          year = twoChar(sDate.year),
+          day = twoChar(sDate.day),
+
+          seconds = twoChar(sTime.second),
+          minutes = twoChar(sTime.minute),
+          hours = twoChar(sTime.hour),
+
+          sens = str(i["sensitivity"]["sens"]),
+          dpi = str(i["sensitivity"]["dpi"]),
+
+          rawinput = str(i["sensitivity"]["rawinput"]),
+          yaw = str(i["sensitivity"]["yaw"]),
+          win = str(i["sensitivity"]["win"]),
+
+          inch = str(i["sensitivity"]["size"]["inch"]),
+          cm = str(i["sensitivity"]["size"]["cm"]),
+
+          zoom_ratio = str(i["sensitivity"]["size"]["zoom"]["ratio"]),
+          zoom_inch = str(i["sensitivity"]["size"]["zoom"]["inch"]),
+          zoom_cm = str(i["sensitivity"]["size"]["zoom"]["cm"]),
+
+          type = str(i["type"]),
+
+          number = sensNumber
+        )
+
+      self.HistoryWindow.history_view.setHtml(styles + historyText)
+
+  def loadHistory(self):
+    min = 9999999999999999
+    max = 0
+
+    for i in history:
+      for j in history[i]:
+        if j.get("date", None):
+          sDate = int(time.mktime(datetime.datetime.strptime(j["date"], "%Y-%m-%d %H:%M:%S").date().timetuple()))
+          if sDate < min:
+            min = sDate
+
+          if sDate > max:
+            max = sDate
+    
+    if min != 9999999999999999:
+      self.history_calendar.setHidden(False)
+      self.history_show.setHidden(False)
+      minDate = datetime.datetime.fromtimestamp(min)
+      maxDate = datetime.datetime.fromtimestamp(max)
+
+      minCalendar = QDate(minDate.year, minDate.month, minDate.day)
+      maxCalendar = QDate(maxDate.year, maxDate.month, maxDate.day)
+
+      self.history_calendar.setDateRange(minCalendar, maxCalendar)
+    else:
+      self.history_calendar.setHidden(True)
+      self.history_show.setHidden(True)
+
+  def openUrl(self):
+    webbrowser.open(SKILL_URL, new = 2, autoraise = True)
+
+  def loadSettings(self):
+    # low
+    self.settings_random_low_min.setText(str(cfg["random"]["low"]["min"]))
+    self.settings_random_low_max.setText(str(cfg["random"]["low"]["max"]))
+
+    # medium
+    self.settings_random_medium_min.setText(str(cfg["random"]["medium"]["min"]))
+    self.settings_random_medium_max.setText(str(cfg["random"]["medium"]["max"]))
+
+    # high
+    self.settings_random_high_min.setText(str(cfg["random"]["high"]["min"]))
+    self.settings_random_high_max.setText(str(cfg["random"]["high"]["max"]))
+
+    # all
+    self.settings_random_all_min.setText(str(cfg["random"]["all"]["min"]))
+    self.settings_random_all_max.setText(str(cfg["random"]["all"]["max"]))
+
+    self.size_win_sens.setValue(int(cfg.get("win_sens", 6)))
+    self.settings_m_yaw.setText(str(cfg.get("m_yaw", 0.022)))
+
+  def saveSettings(self):
+    cfg["random"] = {
+      "low" : {
+        "min" : int(self.settings_random_low_min.text()),
+        "max" : int(self.settings_random_low_max.text())
+      },
+
+      "medium" : {
+        "min" : int(self.settings_random_medium_min.text()),
+        "max" : int(self.settings_random_medium_max.text())
+      },
+
+      "high" : {
+        "min" : int(self.settings_random_high_min.text()),
+        "max" : int(self.settings_random_high_max.text())
+      },
+
+      "all" : {
+        "min" : int(self.settings_random_all_min.text()),
+        "max" : int(self.settings_random_all_max.text())
+      }
+    }
+
+    # m_yaw
+    cfg["m_yaw"] = float(self.settings_m_yaw.text())
+
+    # Windows Sensitivity
+    cfg["win_sens"] = int(self.size_win_sens.value())
+
+    saveConfig()
+
+    self.settings_label.setHidden(False)
+    threading.Timer(1.5, self.hideSettingsLabel).start()
+
+  def hideSettingsLabel(self):
+    self.settings_label.setHidden(True)
+
   def size2sens_GenerateFromInch(self):
     inch = float(self.size2sens_inch.text() if len(self.size2sens_inch.text()) > 0 else -1)
     dpi = int(self.size2sens_dpi.text() if len(self.size2sens_dpi.text()) > 2 else -1)
+    m_yaw = float(cfg["m_yaw"])
 
     if inch == -1 or dpi == -1:
       return
 
     raw = 360 / inch
-    sens = round(raw / dpi / 0.022, 2)
+    sens = round(raw / dpi / m_yaw, 2)
 
-    self.size2sens_sens.setText(str(sens))
+    self.size2sens_result_sens.setText(str(sens))
     self.size2sens_result_inch.setText(str(inch))
     self.size2sens_result_cm.setText(str(roundSens(inch * 2.54)))
+
+
+  def size2sens_GenerateZoomFromInch(self):
+    inch = float(self.size2sens_inch.text() if len(self.size2sens_inch.text()) > 0 else -1)
+    dpi = int(self.size2sens_dpi.text() if len(self.size2sens_dpi.text()) > 2 else -1)
+    m_yaw = float(cfg["m_yaw"])
+    sens = float(self.size2sens_sens.text() if len(self.size2sens_sens.text()) > 0 else -1)
+
+    if inch == -1 or dpi == -1 or sens == -1:
+      return
+
+    raw = 360 / inch
+    sens = round(raw / dpi / m_yaw, 2)
+
+    self.size2sens_result_sens.setText(str(sens))
+    self.size2sens_result_inch.setText(str(inch))
+    self.size2sens_result_cm.setText(str(roundSens(inch * 2.54)))
+    self.size2sens_result_zoom.setText(str(roundSens((sens / (1.1 * 100)) * 100)))
 
   def size2sens_GenerateFromCM(self):
     cm = float(self.size2sens_cm.text() if len(self.size2sens_cm.text()) > 0 else -1)
     dpi = int(self.size2sens_dpi.text() if len(self.size2sens_dpi.text()) > 2 else -1)
+    m_yaw = float(cfg["m_yaw"])
 
     if cm == -1 or dpi == -1:
       return
 
-    sens = round((360 / (cm / 2.54)) / dpi / 0.022, 2)
+    sens = round((360 / (cm / 2.54)) / dpi / m_yaw, 2)
 
-    self.size2sens_sens.setText(str(sens))
+    self.size2sens_result_sens.setText(str(sens))
+    self.size2sens_result_inch.setText(str(roundSens((cm / 2.54))))
+    self.size2sens_result_cm.setText(str(cm))
+
+
+  def size2sens_GenerateZoomFromCM(self):
+    cm = float(self.size2sens_cm.text() if len(self.size2sens_cm.text()) > 0 else -1)
+    dpi = int(self.size2sens_dpi.text() if len(self.size2sens_dpi.text()) > 2 else -1)
+    m_yaw = float(cfg["m_yaw"])
+
+    if cm == -1 or dpi == -1:
+      return
+
+    sens = round((360 / (cm / 2.54)) / dpi / m_yaw, 2)
+
+    self.size2sens_result_sens.setText(str(sens))
     self.size2sens_result_inch.setText(str(roundSens((cm / 2.54))))
     self.size2sens_result_cm.setText(str(cm))
 
@@ -172,7 +474,7 @@ class MainWindow(QWidget, Ui_Form):
     cm = str(self.size_result_cm.text())
 
     dpi = str(self.size_dpi.text())
-    win = str(self.size_win_sens.value())
+    win = str(cfg["win_sens"])
 
     inch = str(self.size_result_in.text())
     sens = str(self.size_sens.text())
@@ -229,27 +531,27 @@ zoom in/360: %s
       return
 
     # m_yaw
-    yaw = float(self.size_yaw.text())
+    yaw = float(cfg["m_yaw"])
 
     # mouse dpi
     dpi = int(self.size_dpi.text())
     if dpi == 0:
-      dpi = 400
+      return
 
     # sensitivity
     sens = float(self.size_sens.text())
     if sens == 0:
-      sens = 0.1
+      return
 
     # zoom_sensitivity_ratio
     zoom = float(self.size_zoom.text())
 
     # return window's sens multiplier
     # if rawinput == 1: return 6 else: return slider's value
-    win = winSens(self.size_rawinput.isChecked() and 6 or self.size_win_sens.value())
+    win = (self.size_rawinput.isChecked() and 6 or cfg["win_sens"])
 
     # inch/360
-    size = (360 / (yaw * dpi * win * sens))
+    size = (360 / (yaw * dpi * winSens(win) * sens))
 
     # final result
     cm   = roundSens(size * 2.54) # 2.54 == inch size
@@ -262,6 +564,42 @@ zoom in/360: %s
     # shows result for zoom's "cm" and "in" /360
     self.size_result_zoom_cm.setText(str(zoomSens(cm, zoom))) # cm
     self.size_result_zoom_in.setText(str(zoomSens(inch, zoom))) # in
+
+    # gets the current date and time
+    date = datetime.datetime.now()
+
+    # create a string with date in it: yyyy-mm-dd
+    calendarDate = date.strftime("%Y-%m-%d")
+    sensDate = date.strftime("%Y-%m-%d %H:%M:%S")
+
+    # dict that will be saved to 
+    # history.json when the sensitivity 
+    # is generated
+    if history.get(calendarDate, None) == None:
+      history[calendarDate] = []
+
+    history[calendarDate].append({
+      "date" : sensDate,
+      "type" : "calculated",
+      "sensitivity" : {
+        "sens" : float(sens),
+        "dpi" : int(dpi),
+        "yaw" : float(yaw),
+        "win" : int(win),
+        "rawinput" : str(self.size_rawinput.isChecked()),
+        "size" : {
+          "cm" : float(cm),
+          "inch" : float(inch),
+
+          "zoom" : {
+            "ratio" : int(zoom),
+            "cm" : float(zoomSens(cm, zoom)),
+            "inch" : float(zoomSens(inch, zoom))
+          }
+        }
+      }
+    })
+    saveHistory()
   #END: onCalculate
 
   """ END: TAB: size/360 """
@@ -315,7 +653,7 @@ zoom in/360: %s
     sens = r['sens']
 
     # inch/360
-    size = (360 / (0.022 * dpi * sens))
+    size = (360 / (cfg["m_yaw"] * dpi * sens))
 
     # final result
     cm   = roundSens(size * 2.54) # 2.54 == inch size
@@ -326,6 +664,42 @@ zoom in/360: %s
     self.random_gen_dpi.setText(str(dpi))
     self.random_gen_cm.setText(str(cm)) # cm
     self.random_gen_in.setText(str(inch)) # in
+
+    # gets the current date and time
+    date = datetime.datetime.now()
+
+    # create a string with date in it: yyyy-mm-dd
+    calendarDate = date.strftime("%Y-%m-%d")
+    sensDate = date.strftime("%Y-%m-%d %H:%M:%S")
+
+    # dict that will be saved to 
+    # history.json when the sensitivity 
+    # is generated
+    if history.get(calendarDate, None) == None:
+      history[calendarDate] = []
+
+    history[calendarDate].append({
+      "date" : sensDate,
+      "type" : "generated",
+      "sensitivity" : {
+        "sens" : float(sens),
+        "dpi" : int(dpi),
+        "yaw" : float(cfg["m_yaw"]),
+        "win" : 6,
+        "rawinput" : "True",
+        "size" : {
+          "cm" : float(cm),
+          "inch" : float(inch),
+
+          "zoom" : {
+            "ratio" : 1,
+            "cm" : float(cm),
+            "inch" : float(inch)
+          }
+        }
+      }
+    })
+    saveHistory()
   #END: onCalculate
 
   """ END: TAB: Random """
@@ -384,7 +758,7 @@ zoom in/360: %s
     sens = float(self.convert_sens.text())
 
     # current sensitivity's in/360
-    calc = (360 / (0.022 * dpi * sens))
+    calc = (360 / (cfg["m_yaw"] * dpi * sens))
 
     if self.convert_all.isChecked():
       # get the dpi list for the mouse
@@ -393,7 +767,7 @@ zoom in/360: %s
 
       for d in dpiList:
         raw = 360 / calc
-        newSens = round(raw / d / 0.022, 2)
+        newSens = round(raw / d / cfg["m_yaw"], 2)
         listText += "DPI: " + str(d) + "\nSensitivity: " + str(newSens) + "\n\n"
 
       # set the label with the sens list
@@ -401,7 +775,7 @@ zoom in/360: %s
     else:
       newDPI = int(len(self.convert_new_dpi.text()) > 0 and self.convert_new_dpi.text() or 400)
       raw = 360 / calc
-      newSens = round(raw / newDPI / 0.022, 2)
+      newSens = round(raw / newDPI / cfg["m_yaw"], 2)
       # set the label with the new sens
       self.convert_new_sens.setText(str(newSens))
 
