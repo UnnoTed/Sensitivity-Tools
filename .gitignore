@@ -1,5 +1,3 @@
 build/
-dist/Sensitivity Tools.exe
-dist/main.exe
-dist/w9xpopen.exe
+dist/*
 *.pyc
