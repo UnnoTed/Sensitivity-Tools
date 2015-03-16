@@ -1,0 +1,22 @@
+{
+  "m_yaw": 0.022, 
+  "random": {
+    "all": {
+      "max": 3, 
+      "min": 45
+    }, 
+    "high": {
+      "max": 3, 
+      "min": 14
+    }, 
+    "low": {
+      "max": 22, 
+      "min": 45
+    }, 
+    "medium": {
+      "max": 14, 
+      "min": 22
+    }
+  }, 
+  "win_sens": 6
+}
